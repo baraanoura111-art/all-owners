@@ -82,7 +82,7 @@ function copy(t) {
   function fallback() { var a = document.createElement('textarea'); a.value = t; a.style.position = 'fixed'; a.style.opacity = '0'; document.body.appendChild(a); a.select(); try { document.execCommand('copy'); done(); } catch (e) {} a.remove(); }
 }
 var LEFT = null, LIMIT = 100, WIDE = false;
-function leftTxt() { return LEFT === null ? '' : LEFT + ' of ' + LIMIT + ' contacts left today'; }
+function leftTxt() { return ''; }
 var CT = {};   // contact details already fetched, by sheet row
 function rowHtml(o) {
   if (o.shown) { CT[o.row] = o; o.hw = !!o.wa; o.hp = !!(o.wa || o.ph); o.he = !!o.e; }
