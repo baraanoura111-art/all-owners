@@ -81,21 +81,37 @@ function copy(t) {
   if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).then(done, fallback); else fallback();
   function fallback() { var a = document.createElement('textarea'); a.value = t; a.style.position = 'fixed'; a.style.opacity = '0'; document.body.appendChild(a); a.select(); try { document.execCommand('copy'); done(); } catch (e) {} a.remove(); }
 }
-function list(r, label, wide) {
-  if (!r.rows.length) { $('out').innerHTML = state('<b>No owners found</b>' + esc(label)); return; }
-  var h = '<div class="h">' + n(r.rows.length) + (r.more ? '+' : '') + ' owner' + (r.rows.length === 1 ? '' : 's') + ' · ' + esc(label) + '</div>';
-  h += r.rows.map(function (o) {
-    var num = o.wa ? '+' + o.wa : o.ph;
-    var sub = [wide ? o.cl + ' · ' + o.area : '', num, o.e].filter(Boolean).join(' · ');
-    return '<div class="r"><div class="u">' + esc(o.u || '—') + '</div><div class="m"><b>' + esc(o.n || 'No name') + '</b><span>' + esc(sub) + '</span></div><div class="a">' +
-      (o.wa ? '<a class="wa" href="' + esc(waUrl(o.wa)) + '" target="_blank" rel="noopener">WhatsApp</a><a href="tel:+' + esc(o.wa) + '">Call</a>' : (o.ph ? '<a href="tel:' + esc(o.ph) + '">Call</a>' : '')) +
+var LEFT = null, LIMIT = 100, WIDE = false;
+function leftTxt() { return LEFT === null ? '' : LEFT + ' of ' + LIMIT + ' contacts left today'; }
+function rowHtml(o) {
+  var num = o.wa ? '+' + o.wa : o.ph, acts;
+  if (o.shown) {
+    acts = (o.wa ? '<a class="wa" href="' + esc(waUrl(o.wa)) + '" target="_blank" rel="noopener">WhatsApp</a><a href="tel:+' + esc(o.wa) + '">Call</a>' : (o.ph ? '<a href="tel:' + esc(o.ph) + '">Call</a>' : '')) +
       (num ? '<button type="button" data-c="' + esc(num) + '">Copy</button>' : '') +
-      (o.e ? '<a href="mailto:' + esc(o.e) + '">Email</a>' : '') + '</div></div>';
-  }).join('');
+      (o.e ? '<a href="mailto:' + esc(o.e) + '">Email</a>' : '') || '<span class="none">No contact details</span>';
+  } else acts = o.has ? '<button type="button" class="show" data-r="' + o.row + '">Show contact</button>' : '<span class="none">No contact details</span>';
+  var sub = [WIDE ? o.cl + ' · ' + o.area : '', o.shown ? num : '', o.shown ? o.e : ''].filter(Boolean).join(' · ');
+  return '<div class="r" id="r' + o.row + '"><div class="u">' + esc(o.u || '—') + '</div><div class="m"><b>' + esc(o.n || 'No name') + '</b>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div><div class="a">' + acts + '</div></div>';
+}
+function list(r, label, wide) {
+  WIDE = wide; if (r.left !== undefined) { LEFT = r.left; LIMIT = r.limit || LIMIT; }
+  if (!r.rows.length) { $('out').innerHTML = state('<b>No owners found</b>' + esc(label)); return; }
+  var h = '<div class="h"><span>' + n(r.rows.length) + (r.more ? '+' : '') + ' owner' + (r.rows.length === 1 ? '' : 's') + ' · ' + esc(label) + '</span><em id="left">' + leftTxt() + '</em></div>';
+  h += r.rows.map(rowHtml).join('');
   if (r.more) h += '<div class="note">Showing the first ' + n(r.rows.length) + '. Narrow it down with a unit number or a fuller name.</div>';
   $('out').innerHTML = h;
 }
-document.addEventListener('click', function (e) { var b = e.target.closest('[data-c]'); if (b) copy(b.getAttribute('data-c')); });
+function reveal(b) {
+  var row = b.getAttribute('data-r'); b.disabled = true; b.textContent = 'Loading…';
+  api('revealOwner', [Number(row)]).then(function (x) {
+    LEFT = x.left; var el = $('r' + row); if (el) el.outerHTML = rowHtml(x.o);
+    if ($('left')) $('left').textContent = leftTxt();
+  }).catch(function (e) { b.disabled = false; b.textContent = 'Show contact'; if (!e.auth) toast(e.message); });
+}
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-c]'); if (b) copy(b.getAttribute('data-c'));
+  var s = e.target.closest('[data-r]'); if (s && !s.disabled) reveal(s);
+});
 
 if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
 if (store(TK)) start(); else showLogin('');

@@ -14,10 +14,15 @@
  *   ALERT_EMAIL = where alerts go (default: the Google account that owns this script)
  *   ALERT_SKIP  = people who don't trigger alerts, e.g. BARAA  (comma separated; their use is still logged)
  * After pasting, run testAlert once (▷ Run) to allow sending email, then deploy a New version.
+ *
+ * Contact details are hidden until someone taps Show. Each person can show DAILY_LIMIT owners a day (default 100;
+ * the same owner again the same day doesn't count twice). Optional Script properties:
+ *   DAILY_LIMIT = 100           NO_LIMIT = BARAA   (people without a limit, comma separated)
  */
 const TOKEN_DAYS = 30, MAX_TRIES = 5, MAX_ROWS = 3000, MAX_SEARCH = 200;
 
-const API = { getOwnerIndex: getOwnerIndex, getOwners: getOwners, searchOwners: searchOwners };
+const API = { getOwnerIndex: getOwnerIndex, getOwners: getOwners, searchOwners: searchOwners, revealOwner: revealOwner };
+var USER = '';
 
 function doGet() {
   return ContentService.createTextOutput('All Owners is running. Open the app to use it.');
@@ -30,7 +35,7 @@ function doPost(e) {
     DEVICE = device_(req.ua);
     if (req.action === 'login') out = { ok: true, result: login_(req.pin) };
     else {
-      const user = checkToken_(req.token);
+      const user = checkToken_(req.token); USER = user;
       if (!Object.prototype.hasOwnProperty.call(API, req.action)) throw new Error('Unknown action: ' + req.action);
       out = { ok: true, user: user, result: API[req.action].apply(null, req.args || []) };
       track_(user, req.action, req.args || [], out.result);
@@ -99,18 +104,20 @@ function device_(ua) {
   const br = /Edg\//.test(ua) ? 'Edge' : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /Firefox|FxiOS/.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : '';
   return os + (br ? ' · ' + br : '');
 }
-function skip_(user) {
-  const s = String(PropertiesService.getScriptProperties().getProperty('ALERT_SKIP') || '').toUpperCase().split(/[\s,]+/);
+function inList_(prop, user) {
+  const s = String(PropertiesService.getScriptProperties().getProperty(prop) || '').toUpperCase().split(/[\s,]+/);
   return s.indexOf(String(user).toUpperCase()) !== -1;
 }
+function skip_(user) { return inList_('ALERT_SKIP', user); }
 function what_(action, args) {
   if (action === 'getOwners') return 'Opened ' + args[0] + (args[1] ? ' · unit ' + args[1] : '');
   if (action === 'searchOwners') return 'Searched "' + args[0] + '"';
+  if (action === 'revealOwner') return 'Showed contact · row ' + args[0];
   return 'Opened the app';
 }
 function track_(user, action, args, result) {
   const shown = result && result.rows ? result.rows.length : '';
-  log_(user, what_(action, args), '', shown);
+  log_(user, action === 'revealOwner' && result && result.o ? 'Showed contact · ' + result.o.cl + ' · unit ' + result.o.u + ' · ' + result.o.n : what_(action, args), '', shown);
   if (skip_(user)) return;
   const cache = CacheService.getScriptCache(), key = 'seen:' + user;
   if (!cache.get(key)) alert_(user + ' is using All Owners', user + ' started using All Owners (' + DEVICE + '): ' + what_(action, args) + '.');
@@ -158,20 +165,61 @@ function getOwnerIndex() {
   try { cache.put('aoIndex', JSON.stringify(out), 1800); } catch (e) {}
   return out;
 }
-function row_(r, n) { return { row: n, area: String(r[0]), cl: String(r[1]), u: String(r[2]), n: String(r[3]), wa: String(r[4]).replace(/\D/g, ''), ph: String(r[5]), e: String(r[6]) }; }
+function full_(r, n) { return { row: n, area: String(r[0]), cl: String(r[1]), u: String(r[2]), n: String(r[3]), wa: String(r[4]).replace(/\D/g, ''), ph: String(r[5]), e: String(r[6]) }; }
+/** Rows go out without contact details unless this person already showed that owner today. */
+function row_(r, n, seen) {
+  const o = full_(r, n);
+  if (seen && seen[n]) { o.shown = true; return o; }
+  o.has = !!(o.wa || o.ph || o.e); delete o.wa; delete o.ph; delete o.e;
+  return o;
+}
+
+/* ---------- Daily limit on showing contact details ---------- */
+function today_() { return Utilities.formatDate(new Date(), 'Asia/Dubai', 'yyyy-MM-dd'); }
+function limit_() { return Number(PropertiesService.getScriptProperties().getProperty('DAILY_LIMIT')) || 100; }
+function revKey_(user) { return 'REV_' + String(user).toUpperCase() + '_' + today_(); }
+function revealed_(user) {
+  try { const l = JSON.parse(PropertiesService.getScriptProperties().getProperty(revKey_(user)) || '[]'), o = {}; l.forEach(function (n) { o[n] = 1; }); o._n = l.length; return o; }
+  catch (e) { return { _n: 0 }; }
+}
+function left_(user) { return inList_('NO_LIMIT', user) ? null : Math.max(0, limit_() - revealed_(user)._n); }
+/** Show one owner's WhatsApp, mobile and email (counts towards the daily limit). */
+function revealOwner(row) {
+  row = Number(row);
+  const sh = tab_('Owners');
+  if (!(row >= 2 && row <= sh.getLastRow() && row === Math.floor(row))) throw new Error('Owner not found.');
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const props = PropertiesService.getScriptProperties(), key = revKey_(USER);
+    const list = JSON.parse(props.getProperty(key) || '[]');
+    if (list.indexOf(row) === -1) {
+      if (!inList_('NO_LIMIT', USER) && list.length >= limit_()) {
+        const c = CacheService.getScriptCache();
+        if (!c.get('limitAlert:' + USER)) { c.put('limitAlert:' + USER, '1', 21600); alert_(USER + ' reached the daily limit', USER + ' has shown ' + limit_() + ' owners today and tried to see more (' + DEVICE + ').'); }
+        throw new Error('Daily limit reached: ' + limit_() + ' owners a day. It resets at midnight.');
+      }
+      list.push(row); props.setProperty(key, JSON.stringify(list));
+      // tidy up keys from earlier days
+      Object.keys(props.getProperties()).forEach(function (k) { if (/^REV_.*_\d{4}-\d\d-\d\d$/.test(k) && k.slice(-10) !== today_()) props.deleteProperty(k); });
+    }
+    const o = full_(sh.getRange(row, 1, 1, 7).getValues()[0], row);
+    o.shown = true;
+    return { o: o, left: inList_('NO_LIMIT', USER) ? null : Math.max(0, limit_() - list.length) };
+  } finally { lock.releaseLock(); }
+}
 /** Owners in one building / cluster, optionally filtered by unit (exact matches first). */
 function getOwners(cl, unit) {
   const ix = getOwnerIndex().list.filter(function (x) { return x.cl === String(cl); })[0];
   if (!ix) throw new Error('Building not found: ' + cl);
   const v = tab_('Owners').getRange(ix.start, 1, ix.n, 7).getValues();
-  const q = String(unit || '').trim().toLowerCase(), out = [];
+  const q = String(unit || '').trim().toLowerCase(), out = [], seen = revealed_(USER);
   v.forEach(function (r, i) {
     if (String(r[1]) !== ix.cl) return;
     if (q && String(r[2]).toLowerCase().indexOf(q) === -1) return;
-    out.push(row_(r, ix.start + i));
+    out.push(row_(r, ix.start + i, seen));
   });
   if (q) out.sort(function (a, b) { return (a.u.toLowerCase() === q ? 0 : 1) - (b.u.toLowerCase() === q ? 0 : 1); });
-  return { cl: ix.cl, area: ix.area, rows: out.slice(0, MAX_ROWS), more: Math.max(0, out.length - MAX_ROWS) };
+  return { cl: ix.cl, area: ix.area, rows: out.slice(0, MAX_ROWS), more: Math.max(0, out.length - MAX_ROWS), left: left_(USER), limit: limit_() };
 }
 /** Search every owner by name, phone or email. */
 function searchOwners(q) {
@@ -185,12 +233,12 @@ function searchOwners(q) {
     const r = cells[i].getRow(); if (r < 2 || seen[r]) continue; seen[r] = 1; rows.push(r);
   }
   rows.sort(function (a, b) { return a - b; });
-  const out = [];
+  const out = [], mine = revealed_(USER);
   for (let i = 0; i < rows.length;) {
     let j = i; while (j + 1 < rows.length && rows[j + 1] - rows[j] <= 60) j++;
     const from = rows[i], v = sh.getRange(from, 1, rows[j] - from + 1, 7).getValues();
-    for (let k = i; k <= j; k++) out.push(row_(v[rows[k] - from], rows[k]));
+    for (let k = i; k <= j; k++) out.push(row_(v[rows[k] - from], rows[k], mine));
     i = j + 1;
   }
-  return { rows: out, more: rows.length >= MAX_SEARCH };
+  return { rows: out, more: rows.length >= MAX_SEARCH, left: left_(USER), limit: limit_() };
 }
