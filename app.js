@@ -86,6 +86,7 @@ function leftTxt() { return LEFT === null ? '' : LEFT + ' of ' + LIMIT + ' conta
 var CT = {};   // contact details already fetched, by sheet row
 function rowHtml(o) {
   if (o.shown) { CT[o.row] = o; o.hw = !!o.wa; o.hp = !!(o.wa || o.ph); o.he = !!o.e; }
+  else if (o.hw === undefined && o.has) { o.hw = o.hp = true; }   // older back end
   var acts = (o.hw ? '<button type="button" class="wa" data-act="wa" data-r="' + o.row + '">WhatsApp</button>' : '') +
     (o.hp ? '<button type="button" data-act="tel" data-r="' + o.row + '">Call</button>' : '') +
     (o.he ? '<button type="button" data-act="mail" data-r="' + o.row + '">Email</button>' : '');
