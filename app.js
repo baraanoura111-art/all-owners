@@ -70,9 +70,9 @@ function fetchOwners() {
     .catch(function (e) { if (my === seq && !e.auth) $('out').innerHTML = state('<b>Not loaded</b>' + esc(e.message)); });
 }
 function search() {
-  var q = $('q').value.trim(); if (q.length < 3) { toast('Type at least 3 letters or digits'); return; }
+  var q = $('q').value.trim(); if (q.length < 3 && !/\d/.test(q)) { toast('Type at least 3 letters or digits'); return; }
   var my = ++seq; $('out').innerHTML = state('Searching all owners…'); $('q').blur();
-  api('searchOwners', [q]).then(function (r) { if (my === seq) list(r, '“' + q + '”', true); })
+  api('searchOwners', [q]).then(function (r) { if (my === seq) list(r, r.label || '“' + q + '”', r.label ? !!r.wide : true); })
     .catch(function (e) { if (my === seq && !e.auth) $('out').innerHTML = state('<b>Not done</b>' + esc(e.message)); });
 }
 function waUrl(p) { return (lap && $('desk').checked) ? 'whatsapp://send?phone=' + p : 'https://wa.me/' + p; }

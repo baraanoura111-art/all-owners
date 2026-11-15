@@ -221,9 +221,62 @@ function getOwners(cl, unit) {
   if (q) out.sort(function (a, b) { return (a.u.toLowerCase() === q ? 0 : 1) - (b.u.toLowerCase() === q ? 0 : 1); });
   return { cl: ix.cl, area: ix.area, rows: out.slice(0, MAX_ROWS), more: Math.max(0, out.length - MAX_ROWS), left: left_(USER), limit: limit_() };
 }
-/** Search every owner by name, phone or email. */
+/* ---------- Smart search: "peninsula 4 02" → Peninsula Four, units ending in 02 ---------- */
+const NUM_WORDS = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10 };
+function words_(t) {
+  return String(t || '').toLowerCase().replace(/&/g, ' and ').replace(/(\d)(st|nd|rd|th)\b/g, '$1').replace(/([a-z])(\d)/g, '$1 $2').replace(/(\d)([a-z])/g, '$1 $2')
+    .replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean)
+    .map(function (w) { return NUM_WORDS.hasOwnProperty(w) ? String(NUM_WORDS[w]) : /^\d+$/.test(w) ? String(Number(w)) : w; });
+}
+/** Does every typed word match a word of the name? Numbers must match exactly, words may be the start of a word. */
+function nameHit_(typed, name) {
+  return typed.every(function (t) { return name.some(function (w) { return /^\d+$/.test(t) ? w === t : w.indexOf(t) === 0; }); });
+}
+function findBuildings_(q) {
+  const list = getOwnerIndex().list, raw = String(q).trim().split(/\s+/);
+  const top = raw.length > 1 && /^0\d/.test(raw[raw.length - 1]) ? raw.length - 1 : raw.length;   // "02" is always a unit
+  for (let k = top; k >= Math.max(1, raw.length - 1); k--) {   // only the last word can be the unit
+    const typed = words_(raw.slice(0, k).join(' ')), unit = raw.slice(k).join('');
+    if (!typed.length || (unit && !/\d/.test(unit))) continue;
+    if (typed.join('').length < 3) continue;
+    const hits = list.filter(function (x) { return nameHit_(typed, words_(x.cl)); });
+    if (!hits.length) continue;
+    const exact = hits.filter(function (x) { return words_(x.cl).length === typed.length; });
+    return { blds: exact.length ? exact : hits, unit: unit.toLowerCase() };
+  }
+  return null;
+}
+function buildingSearch_(f) {
+  const sh = tab_('Owners'), mine = revealed_(USER), u = f.unit.replace(/\s+/g, ''), out = [];
+  const blds = f.blds.slice(0, 12);
+  blds.forEach(function (ix) {
+    if (out.length >= MAX_ROWS) return;
+    const v = sh.getRange(ix.start, 1, ix.n, 7).getValues();
+    const rows = [];
+    v.forEach(function (r, i) { if (String(r[1]) === ix.cl) rows.push([r, ix.start + i]); });
+    let pick = rows;
+    if (u) {
+      const norm = function (x) { return String(x[0][2]).toLowerCase().replace(/\s+/g, ''); };
+      pick = rows.filter(function (x) { return norm(x).slice(-u.length) === u; });
+      if (!pick.length) pick = rows.filter(function (x) { return norm(x).indexOf(u) !== -1; });
+    }
+    pick.forEach(function (x) { if (out.length < MAX_ROWS) out.push(row_(x[0], x[1], mine)); });
+  });
+  const names = blds.map(function (x) { return x.cl.replace(/\s+/g, ' '); });
+  const label = (names.length > 3 ? names.slice(0, 3).join(', ') + ' +' + (names.length - 3) : names.join(', ')) + (u ? ' · units ending ' + f.unit : '');
+  return { rows: out, more: out.length >= MAX_ROWS, wide: blds.length > 1, label: label, left: left_(USER), limit: limit_() };
+}
+
+/** Search: a building with an optional unit ("peninsula 4 02"), or any owner by name, phone or email. */
 function searchOwners(q) {
   q = String(q || '').trim();
+  if (q.length < 3 && !/\d/.test(q)) throw new Error('Type at least 3 letters or digits.');
+  if (!/@/.test(q) && !/^[\s+\d\-()]{7,}$/.test(q)) {
+    const f = findBuildings_(q);
+    if (f) return buildingSearch_(f);
+  }
   if (q.length < 3) throw new Error('Type at least 3 letters or digits.');
   const sh = tab_('Owners'), digits = q.replace(/[\s+\-()]/g, '');
   const term = /^\d{5,}$/.test(digits) ? digits.replace(/^00/, '').replace(/^0(?=5)/, '') : q;
