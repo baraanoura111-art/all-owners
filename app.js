@@ -9,7 +9,7 @@ function api(action, args, tries) {
   tries = tries || 0;
   if (!window.API_URL || /PASTE/.test(window.API_URL)) return Promise.reject(new Error('The back-end address is not set yet (config.js).'));
   return fetch(window.API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: action, args: args || [], token: store(TK), pin: action === 'login' ? args[0] : undefined }) })
+    body: JSON.stringify({ action: action, args: args || [], token: store(TK), pin: action === 'login' ? args[0] : undefined, ua: navigator.userAgent }) })
     .then(function (r) { if (!r.ok) throw new Error('No response (' + r.status + ').'); return r.json(); })
     .then(function (j) { if (!j.ok) { var e = new Error(j.error || 'Something went wrong'); e.auth = !!j.auth; throw e; } return j.result; })
     .catch(function (e) {

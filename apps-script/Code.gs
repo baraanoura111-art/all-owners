@@ -8,6 +8,12 @@
  *
  * The sheet needs two tabs: Owners (Area, Building / Cluster, Unit, Owner, WhatsApp, Mobile, Email)
  * and Index (Area, Building / Cluster, First Row, Count). Owners must stay sorted by building.
+ *
+ * Alerts: every use is written to a "Log" tab, and you get an email when someone logs in, starts using the app
+ * (first use after 30 minutes quiet), or types a wrong PIN. Optional Script properties:
+ *   ALERT_EMAIL = where alerts go (default: the Google account that owns this script)
+ *   ALERT_SKIP  = people who don't trigger alerts, e.g. BARAA  (comma separated; their use is still logged)
+ * After pasting, run testAlert once (▷ Run) to allow sending email, then deploy a New version.
  */
 const TOKEN_DAYS = 30, MAX_TRIES = 5, MAX_ROWS = 3000, MAX_SEARCH = 200;
 
@@ -21,11 +27,13 @@ function doPost(e) {
   let out;
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    DEVICE = device_(req.ua);
     if (req.action === 'login') out = { ok: true, result: login_(req.pin) };
     else {
       const user = checkToken_(req.token);
       if (!Object.prototype.hasOwnProperty.call(API, req.action)) throw new Error('Unknown action: ' + req.action);
       out = { ok: true, user: user, result: API[req.action].apply(null, req.args || []) };
+      track_(user, req.action, req.args || [], out.result);
     }
   } catch (err) {
     out = { ok: false, error: String((err && err.message) || err), auth: !!(err && err.auth) };
@@ -48,10 +56,14 @@ function login_(pin) {
   const user = users.filter(function (u) { return p[u] === String(pin || '').trim(); })[0];
   if (!user) {
     cache.put('fails', String(fails + 1), 900);
+    log_('?', 'Wrong PIN', 'Attempt ' + (fails + 1) + ' of ' + MAX_TRIES, '');
+    if (!cache.get('failAlert')) { cache.put('failAlert', '1', 900); alert_('Wrong PIN entered', 'Someone typed a wrong PIN (' + DEVICE + ').' + (fails + 1 >= MAX_TRIES ? ' Logins are now locked for 15 minutes.' : '')); }
     Utilities.sleep(800);
     throw authError_('Wrong PIN.' + (MAX_TRIES - fails - 1 > 0 ? ' ' + (MAX_TRIES - fails - 1) + ' tries left.' : ''));
   }
   cache.remove('fails');
+  log_(nice_(user), 'Logged in', '', '');
+  if (!skip_(user)) { cache.put('seen:' + nice_(user), '1', 1800); alert_(nice_(user) + ' logged in', nice_(user) + ' logged in to All Owners (' + DEVICE + ').'); }
   return { user: nice_(user), token: makeToken_(user) };
 }
 function nice_(u) { return u.charAt(0) + u.slice(1).toLowerCase(); }
@@ -77,6 +89,52 @@ function checkToken_(token) {
   if (!pins_()[bits[0]]) throw authError_('This login was removed. Ask for a new PIN.');
   if (Number(bits[1]) < Date.now()) throw authError_('Your login expired. Please log in again.');
   return nice_(bits[0]);
+}
+
+/* ---------- Log and alerts ---------- */
+var DEVICE = '';
+function device_(ua) {
+  ua = String(ua || '');
+  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : 'unknown device';
+  const br = /Edg\//.test(ua) ? 'Edge' : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /Firefox|FxiOS/.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : '';
+  return os + (br ? ' · ' + br : '');
+}
+function skip_(user) {
+  const s = String(PropertiesService.getScriptProperties().getProperty('ALERT_SKIP') || '').toUpperCase().split(/[\s,]+/);
+  return s.indexOf(String(user).toUpperCase()) !== -1;
+}
+function what_(action, args) {
+  if (action === 'getOwners') return 'Opened ' + args[0] + (args[1] ? ' · unit ' + args[1] : '');
+  if (action === 'searchOwners') return 'Searched "' + args[0] + '"';
+  return 'Opened the app';
+}
+function track_(user, action, args, result) {
+  const shown = result && result.rows ? result.rows.length : '';
+  log_(user, what_(action, args), '', shown);
+  if (skip_(user)) return;
+  const cache = CacheService.getScriptCache(), key = 'seen:' + user;
+  if (!cache.get(key)) alert_(user + ' is using All Owners', user + ' started using All Owners (' + DEVICE + '): ' + what_(action, args) + '.');
+  cache.put(key, '1', 1800);
+}
+function log_(user, what, note, shown) {
+  try {
+    const b = book_(); let sh = b.getSheetByName('Log');
+    if (!sh) { sh = b.insertSheet('Log'); sh.appendRow(['Time', 'User', 'What', 'Owners shown', 'Device', 'Note']); sh.setFrozenRows(1); }
+    sh.appendRow([new Date(), user, what, shown, DEVICE, note || '']);
+  } catch (e) {}
+}
+function alert_(subject, text) {
+  try {
+    const to = PropertiesService.getScriptProperties().getProperty('ALERT_EMAIL') || Session.getEffectiveUser().getEmail();
+    if (!to) return;
+    const when = Utilities.formatDate(new Date(), 'Asia/Dubai', 'EEE d MMM, h:mm a');
+    MailApp.sendEmail(to, 'All Owners · ' + subject, text + '\n\n' + when + ' (Dubai time)\nEvery use is listed in the Log tab of the All Owners sheet.');
+  } catch (e) {}
+}
+/** Run once from the editor (▷ Run) to allow email alerts; sends you a test alert. */
+function testAlert() {
+  DEVICE = 'test from the script editor';
+  alert_('test alert', 'Alerts are working. You will get one when someone logs in, starts using the app, or types a wrong PIN.');
 }
 
 /* ---------- Owners ---------- */
