@@ -94,13 +94,13 @@
     <select id="cl" aria-label="Building or cluster" onchange="S.cl=this.value;S.unit='';$('unit').value='';save();$('unit').disabled=!S.cl;fetchOwners()"></select>
     <input id="unit" aria-label="Unit number" placeholder="Unit number" autocomplete="off" oninput="S.unit=this.value;clearTimeout(T);T=setTimeout(fetchOwners,350)">
   </div>
-  <form class="s" onsubmit="search();return false"><input id="q" placeholder="Search: building and unit (peninsula 4 02), owner name, phone or email" autocomplete="off" enterkeyhint="search"><button class="btn" type="submit">Search</button></form>
+  <form class="s" onsubmit="search();return false"><input id="q" placeholder="Search building and unit, owner name, phone or email" autocomplete="off" enterkeyhint="search"><button class="btn" type="submit">Search</button></form>
   <div id="out"></div>
   <label class="opt"><input type="checkbox" id="desk" onchange="saveDesk()"> Open WhatsApp in the desktop app</label>
 </div>
 <div id="toast"></div>
 
-<script src="config.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="config.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>
