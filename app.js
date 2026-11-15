@@ -83,15 +83,14 @@ function copy(t) {
 }
 var LEFT = null, LIMIT = 100, WIDE = false;
 function leftTxt() { return LEFT === null ? '' : LEFT + ' of ' + LIMIT + ' contacts left today'; }
+var CT = {};   // contact details already fetched, by sheet row
 function rowHtml(o) {
-  var num = o.wa ? '+' + o.wa : o.ph, acts;
-  if (o.shown) {
-    acts = (o.wa ? '<a class="wa" href="' + esc(waUrl(o.wa)) + '" target="_blank" rel="noopener">WhatsApp</a><a href="tel:+' + esc(o.wa) + '">Call</a>' : (o.ph ? '<a href="tel:' + esc(o.ph) + '">Call</a>' : '')) +
-      (num ? '<button type="button" data-c="' + esc(num) + '">Copy</button>' : '') +
-      (o.e ? '<a href="mailto:' + esc(o.e) + '">Email</a>' : '') || '<span class="none">No contact details</span>';
-  } else acts = o.has ? '<button type="button" class="show" data-r="' + o.row + '">Show contact</button>' : '<span class="none">No contact details</span>';
-  var sub = [WIDE ? o.cl + ' · ' + o.area : '', o.shown ? num : '', o.shown ? o.e : ''].filter(Boolean).join(' · ');
-  return '<div class="r" id="r' + o.row + '"><div class="u">' + esc(o.u || '—') + '</div><div class="m"><b>' + esc(o.n || 'No name') + '</b>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div><div class="a">' + acts + '</div></div>';
+  if (o.shown) { CT[o.row] = o; o.hw = !!o.wa; o.hp = !!(o.wa || o.ph); o.he = !!o.e; }
+  var acts = (o.hw ? '<button type="button" class="wa" data-act="wa" data-r="' + o.row + '">WhatsApp</button>' : '') +
+    (o.hp ? '<button type="button" data-act="tel" data-r="' + o.row + '">Call</button>' : '') +
+    (o.he ? '<button type="button" data-act="mail" data-r="' + o.row + '">Email</button>' : '');
+  var sub = WIDE ? o.cl + ' · ' + o.area : '';
+  return '<div class="r" id="r' + o.row + '"><div class="u">' + esc(o.u || '—') + '</div><div class="m"><b>' + esc(o.n || 'No name') + '</b>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div><div class="a">' + (acts || '<span class="none">No contact details</span>') + '</div></div>';
 }
 function list(r, label, wide) {
   WIDE = wide; if (r.left !== undefined) { LEFT = r.left; LIMIT = r.limit || LIMIT; }
@@ -101,16 +100,29 @@ function list(r, label, wide) {
   if (r.more) h += '<div class="note">Showing the first ' + n(r.rows.length) + '. Narrow it down with a unit number or a fuller name.</div>';
   $('out').innerHTML = h;
 }
-function reveal(b) {
-  var row = b.getAttribute('data-r'); b.disabled = true; b.textContent = 'Loading…';
+function target(act, o) {
+  if (act === 'wa') return o.wa ? waUrl(o.wa) : '';
+  if (act === 'tel') return o.wa ? 'tel:+' + o.wa : (o.ph ? 'tel:' + o.ph : '');
+  return o.e ? 'mailto:' + o.e : '';
+}
+function go(act, url, win) {
+  if (!url) { if (win) win.close(); toast('No contact details for this owner'); return; }
+  if (win) win.location.href = url; else if (act === 'wa' && /^https/.test(url)) window.open(url, '_blank', 'noopener'); else location.href = url;
+}
+function contact(b) {
+  var row = b.getAttribute('data-r'), act = b.getAttribute('data-act');
+  if (CT[row]) { go(act, target(act, CT[row])); return; }
+  // open the WhatsApp tab straight away (inside the tap), then point it at the chat once the number arrives
+  var win = act === 'wa' && !(lap && $('desk').checked) ? window.open('', '_blank') : null;
+  var bs = document.querySelectorAll('#r' + row + ' [data-r]'); bs.forEach(function (x) { x.disabled = true; });
   api('revealOwner', [Number(row)]).then(function (x) {
-    LEFT = x.left; var el = $('r' + row); if (el) el.outerHTML = rowHtml(x.o);
-    if ($('left')) $('left').textContent = leftTxt();
-  }).catch(function (e) { b.disabled = false; b.textContent = 'Show contact'; if (!e.auth) toast(e.message); });
+    CT[row] = x.o; LEFT = x.left; if ($('left')) $('left').textContent = leftTxt();
+    bs.forEach(function (y) { y.disabled = false; });
+    go(act, target(act, x.o), win);
+  }).catch(function (e) { if (win) win.close(); bs.forEach(function (y) { y.disabled = false; }); if (!e.auth) toast(e.message); });
 }
 document.addEventListener('click', function (e) {
-  var b = e.target.closest('[data-c]'); if (b) copy(b.getAttribute('data-c'));
-  var s = e.target.closest('[data-r]'); if (s && !s.disabled) reveal(s);
+  var s = e.target.closest('[data-act]'); if (s && !s.disabled) contact(s);
 });
 
 if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });

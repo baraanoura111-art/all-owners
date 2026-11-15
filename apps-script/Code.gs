@@ -15,7 +15,7 @@
  *   ALERT_SKIP  = people who don't trigger alerts, e.g. BARAA  (comma separated; their use is still logged)
  * After pasting, run testAlert once (▷ Run) to allow sending email, then deploy a New version.
  *
- * Contact details are hidden until someone taps Show. Each person can show DAILY_LIMIT owners a day (default 100;
+ * Contact details are not sent to the app until someone taps WhatsApp, Call or Email on an owner. Each person can show DAILY_LIMIT owners a day (default 100;
  * the same owner again the same day doesn't count twice). Optional Script properties:
  *   DAILY_LIMIT = 100           NO_LIMIT = BARAA   (people without a limit, comma separated)
  */
@@ -170,7 +170,7 @@ function full_(r, n) { return { row: n, area: String(r[0]), cl: String(r[1]), u:
 function row_(r, n, seen) {
   const o = full_(r, n);
   if (seen && seen[n]) { o.shown = true; return o; }
-  o.has = !!(o.wa || o.ph || o.e); delete o.wa; delete o.ph; delete o.e;
+  o.hw = !!o.wa; o.hp = !!(o.wa || o.ph); o.he = !!o.e; delete o.wa; delete o.ph; delete o.e;
   return o;
 }
 
